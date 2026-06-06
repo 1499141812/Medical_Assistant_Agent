@@ -1,0 +1,31 @@
+ # 敏感配置文件（含 API Key）
+config.env
+.env
+*.env
+*.key
+*.pem
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.so
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# IDE 和系统文件
+.vscode/
+.idea/
+.DS_Store
+
+# 项目特定数据（本地数据库、向量库等）
+knowledge/data/chroma_db/
+*.db
+*.sqlite3
+logs/
+
+# 临时文件
+*.log
+*.tmp
