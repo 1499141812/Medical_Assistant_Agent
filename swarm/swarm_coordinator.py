@@ -22,6 +22,65 @@ from agents import ConsultationAgent, DiagnosticAgent, ResearchAgent
 from memory import SessionSummaryManager, SessionSummary, ShortTermMemory, LongTermMemory
 
 
+# ── 快速路由：常见简单问题的关键词匹配 ──
+# 跳过 LeadAgent LLM 调用，直接路由到 ConsultationAgent
+_SIMPLE_QUESTION_KEYWORDS = [
+    # 感冒相关
+    "感冒", "着凉", "受凉", "流感", "伤风",
+    # 发烧
+    "发烧", "发热", "体温", "退烧", "低烧",
+    # 咳嗽
+    "咳嗽", "干咳", "有痰", "咳痰",
+    # 头痛
+    "头痛", "头疼", "偏头痛",
+    # 常见轻症
+    "鼻塞", "流鼻涕", "打喷嚏", "嗓子疼", "喉咙痛",
+    "拉肚子", "腹泻", "便秘", "消化不良",
+    "失眠", "睡不着", "睡眠不好",
+    "牙疼", "牙痛", "口腔溃疡",
+    "过敏", "皮肤痒", "起疹子",
+    # 健康科普
+    "什么是", "是什么意思", "怎么预防", "如何预防",
+    "饮食注意", "吃什么", "不能吃", "多吃",
+    "运动", "锻炼", "减肥", "控制体重",
+    # 用药咨询（非处方）
+    "布洛芬", "对乙酰氨基酚", "感冒药", "退烧药",
+    # 单一简短问题（≤10字大概率是简单问题）
+]
+
+
+def _is_simple_question(question: str) -> bool:
+    """快速判断是否为简单问题，避免 LLM 调用"""
+    q = question.strip()
+    # 短问题 + 包含关键词 → 简单
+    if len(q) <= 15:
+        return True
+    # 包含简单关键词
+    for kw in _SIMPLE_QUESTION_KEYWORDS:
+        if kw in q:
+            return True
+    return False
+
+
+def _is_complex_question(question: str) -> bool:
+    """快速判断是否为复杂问题"""
+    q = question.strip()
+    complex_indicators = [
+        # 多症状分隔符
+        "、", "和", "加", "还有", "同时", "伴有", "并且",
+        # 严重症状
+        "胸痛", "胸闷", "呼吸困难", "昏厥", "晕倒", "心悸",
+        "吐血", "便血", "剧烈疼痛", "视力模糊", "瘫痪",
+        # 复杂关键词
+        "鉴别诊断", "诊断标准", "诊疗指南", "最新研究",
+        "并发症", "后遗症", "慢性病",
+        # 需要分析的
+        "严重吗", "需要就医吗", "要不要去医院", "会不会是",
+    ]
+    count = sum(1 for ind in complex_indicators if ind in q)
+    return count >= 2 or len(q) > 100
+
+
 class SwarmCoordinator:
     """
     Swarm 协调器
@@ -38,6 +97,9 @@ class SwarmCoordinator:
     - 不控制任务分配
     """
 
+    # 简单问题的响应缓存（同会话内有效）
+    _response_cache: Dict[str, Dict[str, Any]] = {}
+
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
@@ -46,32 +108,56 @@ class SwarmCoordinator:
         self.llm_client = llm_client or LLMClient()
         self.enable_swarm = enable_swarm
 
-        # 初始化 Agent
-        self.lead_agent = LeadAgent(llm_client=self.llm_client)
-        self.consultation_agent = ConsultationAgent()
-        self.diagnostic_agent = DiagnosticAgent()
-        self.research_agent = ResearchAgent()
-
-        # Worker 池
-        self.worker_pool: List[Any] = [
-            self.consultation_agent,
-            self.diagnostic_agent,
-            self.research_agent
-        ]
+        # 初始化 Agent（懒加载，首次使用时创建）
+        self._lead_agent: Optional[LeadAgent] = None
+        self._consultation_agent: Optional[ConsultationAgent] = None
+        self._diagnostic_agent: Optional[DiagnosticAgent] = None
+        self._research_agent: Optional[ResearchAgent] = None
 
         # 记忆管理器
         self.session_manager = SessionSummaryManager()
-        self.short_term_memory = ShortTermMemory(storage_type="memory")  # 或 "redis"
+        self.short_term_memory = ShortTermMemory(storage_type="memory")
         self.long_term_memory = LongTermMemory()
 
-        # 将短期记忆注入到所有 Worker Agent 的 Loop
-        # 注意：LeadAgent 不继承 BaseAgent，没有 loop 属性，不需要注入
-        for worker in self.worker_pool:
-            if hasattr(worker, 'loop'):
-                worker.loop.short_term_memory = self.short_term_memory
+        logger.info("SwarmCoordinator initialized (agents lazy-loaded)")
 
-        logger.info(f"SwarmCoordinator initialized with {len(self.worker_pool)} workers")
-        logger.info(f"Memory system: short_term={self.short_term_memory.storage_type}, long_term={'enabled' if self.long_term_memory.enabled else 'disabled'}")
+    # ── Agent 懒加载属性 ──
+    @property
+    def lead_agent(self) -> LeadAgent:
+        if self._lead_agent is None:
+            self._lead_agent = LeadAgent(llm_client=self.llm_client)
+        return self._lead_agent
+
+    @property
+    def consultation_agent(self) -> ConsultationAgent:
+        if self._consultation_agent is None:
+            self._consultation_agent = ConsultationAgent()
+            self._consultation_agent.loop.short_term_memory = self.short_term_memory
+            self._consultation_agent.loop.max_iterations = 3
+            self._consultation_agent.loop.max_tool_calls = 2
+        return self._consultation_agent
+
+    @property
+    def diagnostic_agent(self) -> DiagnosticAgent:
+        if self._diagnostic_agent is None:
+            self._diagnostic_agent = DiagnosticAgent()
+            self._diagnostic_agent.loop.short_term_memory = self.short_term_memory
+            self._diagnostic_agent.loop.max_iterations = 3
+            self._diagnostic_agent.loop.max_tool_calls = 2
+        return self._diagnostic_agent
+
+    @property
+    def research_agent(self) -> ResearchAgent:
+        if self._research_agent is None:
+            self._research_agent = ResearchAgent()
+            self._research_agent.loop.short_term_memory = self.short_term_memory
+            self._research_agent.loop.max_iterations = 3
+            self._research_agent.loop.max_tool_calls = 2
+        return self._research_agent
+
+    @property
+    def worker_pool(self) -> List[Any]:
+        return [self.consultation_agent, self.diagnostic_agent, self.research_agent]
 
     def _get_agent_by_id(self, agent_id: str):
         """根据 agent_id 返回对应的 Agent 实例"""
@@ -105,23 +191,98 @@ class SwarmCoordinator:
 
         logger.info(f"Processing question (session={session_id}): {question[:50]}...")
 
-        # ===== 统一的记忆检索（所有模式都使用）=====
-        # 1. 检索短期记忆（当前会话历史）
-        recent_history = self.short_term_memory.get_recent_messages(
-            session_id=session_id,
-            limit=10  # 最近5轮对话（10条消息）
+        # ── 响应缓存：相同问题直接返回（5分钟内有效）──
+        cache_key = f"{session_id}:{question.strip()}"
+        if cache_key in self._response_cache:
+            cached = self._response_cache[cache_key]
+            age = (start_time - cached["_cached_at"]).total_seconds()
+            if age < 300:  # 5 分钟内有效
+                logger.info(f"⚡ Cache hit (age={age:.0f}s)")
+                cached["total_time"] = 0.01  # 缓存响应几乎瞬时
+                return cached
+            else:
+                del self._response_cache[cache_key]
+
+        # ── 快速路由：关键词匹配，跳过 LLM ──
+        use_fast_path = _is_simple_question(question) and not _is_complex_question(question)
+
+        # ── Swarm 关闭时：直接走 ConsultationAgent，跳过 LeadAgent ──
+        if not self.enable_swarm and use_fast_path:
+            logger.info(f"⚡ Swarm disabled + simple question → ConsultationAgent directly")
+            result = await self.consultation_agent.process({
+                'question': question,
+                'context': context or {},
+                'session_id': session_id
+            })
+            end_time = datetime.now()
+            result.update({
+                'swarm_enabled': False, 'session_id': session_id,
+                'total_time': (end_time - start_time).total_seconds(),
+                'suggestions': result.get('suggestions', []),
+                'disclaimer': result.get('disclaimer',
+                    "⚠️ 以上信息仅供参考，不能替代专业医生的诊断和治疗。如有疑虑，请及时就医。"),
+                '_cached_at': datetime.now(),
+            })
+            self._response_cache[cache_key] = result
+            asyncio.create_task(self._save_long_term_memory(
+                session_id, question, result.get('answer', ''), "disabled_fast", 0,
+                result['total_time']
+            ))
+            return result
+
+        # ── 简单问题：关键词快速路由 ──
+        if use_fast_path:
+            # 简单问题：直接路由到 ConsultationAgent，仅检索短期记忆
+            logger.info(f"⚡ Fast path: routing directly to ConsultationAgent")
+            recent_history = self.short_term_memory.get_recent_messages(
+                session_id=session_id, limit=6
+            )
+            enhanced_context = context or {}
+            if recent_history:
+                enhanced_context["recent_history"] = [
+                    {"role": msg.get("role", ""), "content": msg.get("content", "")}
+                    for msg in recent_history
+                ]
+
+            result = await self.consultation_agent.process({
+                'question': question,
+                'context': enhanced_context,
+                'session_id': session_id
+            })
+            final_answer = result.get('answer', '')
+            result.update({
+                'swarm_enabled': False,
+                'session_id': session_id,
+                'route_reason': 'fast_path: simple question → ConsultationAgent',
+                'suggestions': result.get('suggestions', []),
+            })
+            if 'disclaimer' not in result:
+                result['disclaimer'] = "⚠️ 以上信息仅供参考，不能替代专业医生的诊断和治疗。如有疑虑，请及时就医。"
+
+            end_time = datetime.now()
+            result['total_time'] = (end_time - start_time).total_seconds()
+            result['_cached_at'] = datetime.now()
+            self._response_cache[cache_key] = result
+
+            # 异步保存长期记忆（不阻塞响应）
+            asyncio.create_task(self._save_long_term_memory(
+                session_id, question, final_answer, "fast_path", 0,
+                result['total_time']
+            ))
+            return result
+
+        # ── 复杂/不明问题：完整流水线 ──
+        # 并行检索记忆
+        recent_history_task = asyncio.create_task(
+            asyncio.to_thread(self.short_term_memory.get_recent_messages, session_id, 10)
+        )
+        similar_memories_task = asyncio.create_task(
+            asyncio.to_thread(self.long_term_memory.search_similar_sessions, question, 3)
         )
 
-        # 2. 检索长期记忆（相似历史会话）
-        similar_memories = self.long_term_memory.search_similar_sessions(
-            query=question,
-            limit=3
-        )
-
-        # 3. 构建增强上下文
+        # 构建增强上下文
         enhanced_context = context or {}
-
-        # 添加短期记忆
+        recent_history = await recent_history_task
         if recent_history:
             enhanced_context["recent_history"] = [
                 {"role": msg.get("role", ""), "content": msg.get("content", "")}
@@ -129,13 +290,10 @@ class SwarmCoordinator:
             ]
             logger.info(f"Loaded {len(recent_history)} recent messages from short-term memory")
 
-        # 添加长期记忆
+        similar_memories = await similar_memories_task
         if similar_memories:
             enhanced_context["historical_cases"] = [
-                {
-                    "summary": mem["content"],
-                    "score": mem["score"]
-                }
+                {"summary": mem["content"], "score": mem["score"]}
                 for mem in similar_memories
             ]
             logger.info(f"Found {len(similar_memories)} similar historical cases from long-term memory")
@@ -157,7 +315,6 @@ class SwarmCoordinator:
             agent = self._get_agent_by_id(agent_id)
 
             if agent is None:
-                # 如果找不到 Agent，降级到 ConsultationAgent
                 logger.warning(f"Unknown agent_id: {agent_id}, fallback to ConsultationAgent")
                 agent = self.consultation_agent
 
@@ -175,17 +332,12 @@ class SwarmCoordinator:
                 'session_id': session_id,
                 'route_reason': f'单任务路由到 {agent_id}'
             })
-
-            # 确保单Agent模式下也有 disclaimer 字段
             if 'disclaimer' not in result:
                 result['disclaimer'] = "⚠️ 以上信息仅供参考，不能替代专业医生的诊断和治疗。如有疑虑，请及时就医。"
-
-            # 确保单Agent模式下也有 suggestions 字段
             if 'suggestions' not in result:
                 result['suggestions'] = []
 
         elif len(subtasks) >= 2 and self.enable_swarm:
-            # 多任务 → 启动 Swarm
             logger.info(f"Route: Swarm (Multi-Agent Collaboration) - {len(subtasks)} tasks")
             mode = "swarm"
             result = await self._process_with_swarm(
@@ -195,13 +347,9 @@ class SwarmCoordinator:
                 session_id=session_id,
                 start_time=start_time
             )
-            final_answer = result.get('answer', '')
-
-            # Swarm 模式已经在 _process_with_swarm 中保存了长期记忆，直接返回
-            return result
+            return result  # Swarm 模式内已保存长期记忆
 
         else:
-            # 0个任务或Swarm关闭 → 降级到 ConsultationAgent
             if len(subtasks) == 0:
                 logger.warning("No subtasks generated, fallback to ConsultationAgent")
                 mode = "fallback"
@@ -220,28 +368,38 @@ class SwarmCoordinator:
                 'session_id': session_id
             })
 
-        # ===== 统一的记忆保存（非 Swarm 模式）=====
+        # 保存长期记忆 & 缓存
         end_time = datetime.now()
+        total_time = (end_time - start_time).total_seconds()
+        result['total_time'] = total_time
+        result['_cached_at'] = datetime.now()
+        self._response_cache[cache_key] = result
 
-        # 注意：短期记忆已经在 Agent Loop 中保存了，这里不需要重复保存
+        asyncio.create_task(self._save_long_term_memory(
+            session_id, question, final_answer, mode, len(subtasks), total_time
+        ))
 
-        # 保存到长期记忆
+        return result
+
+    async def _save_long_term_memory(
+        self, session_id: str, question: str, answer: str,
+        mode: str, subtasks_count: int, total_time: float
+    ):
+        """异步保存长期记忆（不阻塞主响应）"""
         try:
             self.long_term_memory.add_session_summary(
                 session_id=session_id,
                 question=question,
-                answer=final_answer,
+                answer=answer,
                 metadata={
                     "mode": mode,
-                    "subtasks_count": len(subtasks),
-                    "total_time": (end_time - start_time).total_seconds(),
+                    "subtasks_count": subtasks_count,
+                    "total_time": total_time,
                 }
             )
-            logger.info(f"Saved to long-term memory (session={session_id}, mode={mode})")
+            logger.debug(f"Saved to long-term memory (session={session_id}, mode={mode})")
         except Exception as e:
             logger.error(f"Failed to save to long-term memory: {e}")
-
-        return result
 
     async def _process_with_swarm(
         self,
@@ -295,11 +453,11 @@ class SwarmCoordinator:
         try:
             await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=90.0  # 增加超时时间到 90 秒，应对复杂案例
+                timeout=60.0  # 60 秒超时（从 90 秒减少）
             )
         except asyncio.TimeoutError:
             timeout_occurred = True
-            logger.warning("Swarm execution timeout (90s)")
+            logger.warning("Swarm execution timeout (60s)")
             # 记录哪些 Agent 已完成，哪些未完成
             completed_agents = list(shared_context.agent_contributions.keys())
             claimed_tasks = [
@@ -391,6 +549,11 @@ class SwarmCoordinator:
         else:
             result['disclaimer'] = "以上分析基于多个专业 Agent 的协作，仅供参考，不能替代医生诊断。"
 
+        # 缓存 swarm 结果（5分钟有效）
+        cache_key = f"{session_id}:{question.strip()}"
+        result['_cached_at'] = end_time
+        self._response_cache[cache_key] = result
+
         return result
 
     async def _worker_execute_assigned_tasks(
@@ -470,10 +633,14 @@ async def process_with_swarm(
     """
     便捷函数：使用 Swarm 处理问题
 
+    后端自动判断问题复杂度：
+    - 简单问题（感冒、发烧等常见症状）→ 单 Agent 快速回复
+    - 复杂问题（多症状组合、需鉴别诊断等）→ 多 Agent Swarm 协作
+
     Args:
         question: 用户问题
         context: 额外上下文
-        enable_swarm: 是否启用 Swarm（False 则总是用单 Agent）
+        enable_swarm: 是否允许 Swarm 协作（默认 True，后端自动判断何时真正启用）
         session_id: 会话ID（如果提供，将使用该ID而不是生成新的）
 
     Returns:

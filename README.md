@@ -1,6 +1,6 @@
 # MediX多智能体医疗助手
 
-基于 Skills-Agent 两层架构的多智能体协作医疗助手系统，融合 Agent Loop、Agent Swarm、记忆管理和 Milvus 知识库。
+基于 Skills-Agent 两层架构的多智能体协作医疗助手系统，融合 Agent Loop、Agent Swarm、记忆管理和 Chroma 知识库。
 
 ## 📋 项目概述
 
@@ -12,7 +12,7 @@
 - **🤖 Agent Loop**: LLM 驱动的 Skill 调用循环，Agent 自主规划、调用 Skills 并完成任务 ✅
 - **🐝 Agent Swarm**: 真正的群体智能（去中心化协作，自主任务认领，并行执行）✅
 - **🧠 记忆系统**: 短期记忆（会话级对话历史）+ 长期记忆（Mem0跨会话记忆）+ **多轮对话上下文利用** ✅
-- **💾 Milvus 知识库**: 统一知识管理，语义检索，支持模糊查询（"血压高" → "高血压"）✅
+- **💾 Chroma 知识库**: 统一知识管理，语义检索，支持模糊查询（"血压高" → "高血压"）✅
 - **⚡ Claude Code Skills**: 8个预定义技能（7个原子 + 1个复杂），一键调用医疗助手 ✅
 - **🏗️ Harness Engineering**: 约束驱动 + 熵管理，系统自动验证和优化，保证安全、简洁、高质量 ✅
 
@@ -23,7 +23,7 @@
 ```
 Skills (函数) → 直接转换 → OpenAI Format → LLM 调用
          ↓
-    Milvus/业务逻辑
+    Chroma/业务逻辑
 ```
 
 ### 关键特性
@@ -62,7 +62,7 @@ Skills (函数) → 直接转换 → OpenAI Format → LLM 调用
 - ✅ 记忆系统（短期+长期）
 - ✅ 多轮对话上下文利用 🌟
 - ✅ Skills 自主选择
-- ✅ Milvus 知识库集成
+- ✅ Chroma 知识库集成
 
 **Harness Engineering（Phase 8）**：
 - ✅ 约束系统（Skill 调用验证、输出验证、自动修复）
@@ -110,7 +110,7 @@ MEM0_CONFIG = {"api_key": "m0-your-api-key-here"}
 ### 4. 初始化知识库
 
 ```bash
-python knowledge/scripts/import_hardcoded_data.py
+python knowledge\import_to_chroma.py
 ```
 
 ### 5. 运行测试
@@ -206,12 +206,12 @@ medix-agent-swarm/
 │   ├── __init__.py
 │   └── auto_fixer.py                  # 自动修复器
 │
-├── knowledge/                         # Milvus 知识库
+├── knowledge/                         # Chroma 知识库
 │   ├── __init__.py
-│   ├── milvus_kb.py                   # 知识库封装
+│   ├── chroma_kb.py                   # 知识库封装
 │   ├── data/
 │   │   ├── documents/                 # 医学知识文档（txt）
-│   │   └── milvus_lite.db             # 向量数据库（自动生成）
+│   │   └── chroma_db/                 # 向量数据库（自动生成）
 │   └── scripts/
 │       ├── __init__.py
 │       └── import_hardcoded_data.py   # 数据导入脚本
@@ -249,12 +249,12 @@ medix-agent-swarm/
 
 | Skill | 功能 | 数据源 | 特点 |
 |-------|------|--------|------|
-| `search_knowledge` | 搜索医学知识库 | Milvus | 语义检索 |
-| `recommend_lifestyle` | 生活方式和用药建议 | Milvus | 个性化建议 |
+| `search_knowledge` | 搜索医学知识库 | Chroma | 语义检索 |
+| `recommend_lifestyle` | 生活方式和用药建议 | Chroma | 个性化建议 |
 | `assess_risk` | 风险等级评估 | 规则引擎 | 高危症状识别 |
 | `analyze_symptoms` | 症状模式分析 | 规则引擎 | 多系统分析 |
-| `disease_code` | ICD-10疾病编码 | Milvus | 标准编码 |
-| `clinical_guideline` | 临床指南检索 | Milvus | 权威指南 |
+| `disease_code` | ICD-10疾病编码 | Chroma | 标准编码 |
+| `clinical_guideline` | 临床指南检索 | Chroma | 权威指南 |
 | `deep_research` | 深度研究 | 网络搜索 | 最新进展 |
 
 ### 3个专业 Agent（自主选择 Skills）
@@ -282,10 +282,10 @@ medix-agent-swarm/
 ### Skills 架构特点
 
 - ✅ **直达架构**: Skills → OpenAI Format
-- ✅ **Skills 自包含**: 直接调用 Milvus 或内置逻辑
+- ✅ **Skills 自包含**: 直接调用 Chroma 或内置逻辑
 - ✅ **Agent 灵活性**: 每个 Agent 注册全部7个 Skills，根据任务自主选择
 - ✅ **SkillRegistry**: 统一管理注册、执行、格式转换
-- ✅ **统一知识库**: 医学知识统一存储在 Milvus 向量数据库，支持语义检索
+- ✅ **统一知识库**: 医学知识统一存储在 Chroma 向量数据库，支持语义检索
 - ✅ **易于扩展**: 添加新 Skill 或新知识无需修改 Agent 代码
 
 
@@ -467,7 +467,7 @@ python examples/test_all.py
 
 ## 📚 统一知识库
 
-- **向量数据库**: Milvus Lite（本地文件，无需服务器）
+- **向量数据库**: Chroma（本地文件，无需服务器）
 - **Embedding 模型**: BAAI/bge-small-zh-v1.5（中文，512维）
 - **数据存储**: `knowledge/data/documents/` (txt 文档)
 - **初始化**: `python knowledge/scripts/import_hardcoded_data.py`
@@ -567,8 +567,8 @@ python examples/test_all.py
 
 ### ✅ 阶段 6: 统一知识库架构（已完成）
 
-- [x] **Milvus 向量数据库集成**
-  - [x] Milvus Lite 本地部署
+- [x] **Chroma 向量数据库集成**
+  - [x] Chroma 本地部署
   - [x] BAAI/bge-small-zh-v1.5 中文 Embedding 模型
   - [x] 512维向量，COSINE 相似度
 
@@ -579,10 +579,10 @@ python examples/test_all.py
   - [x] 数据导入脚本（knowledge/scripts/import_hardcoded_data.py）
 
 - [x] **Skills 重构**
-  - [x] `search_knowledge` → Milvus 语义检索
-  - [x] `recommend_lifestyle` → Milvus 检索生活方式建议
-  - [x] `disease_code` → Milvus 检索 ICD-10 编码
-  - [x] `clinical_guideline` → Milvus 检索临床指南
+  - [x] `search_knowledge` → Chroma 语义检索
+  - [x] `recommend_lifestyle` → Chroma 检索生活方式建议
+  - [x] `disease_code` → Chroma 检索 ICD-10 编码
+  - [x] `clinical_guideline` → Chroma 检索临床指南
 
 - [x] **语义检索能力**
   - [x] 模糊查询支持（"血压高" → "高血压"）
@@ -634,7 +634,7 @@ python examples/test_all.py
 ```
 用户问题
    ↓
-【原子查询】→ 直接调用 Skills → Milvus/业务逻辑
+【原子查询】→ 直接调用 Skills → Chroma/业务逻辑
    │                ↓
    │         OpenAI Format
    │

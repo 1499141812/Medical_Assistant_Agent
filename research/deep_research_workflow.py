@@ -46,7 +46,7 @@ class DeepResearchWorkflow:
         Args:
             llm_client: LLM 客户端
             use_web_search: 是否使用网络搜索
-            use_knowledge_base: 是否使用 Milvus 知识库
+            use_knowledge_base: 是否使用 Chroma 知识库
         """
         self.llm_client = llm_client or LLMClient()
         self.use_web_search = use_web_search
@@ -54,7 +54,7 @@ class DeepResearchWorkflow:
 
         # 初始化组件
         self.web_search = WebSearchTool() if use_web_search else None
-        # 使用 Milvus 知识库单例（和其他 Skills 共享，避免重复加载模型）
+        # 使用 Chroma 知识库单例（和其他 Skills 共享，避免重复加载模型）
         self.knowledge_base = get_knowledge_base() if use_knowledge_base else None
         self.synthesizer = EvidenceSynthesizer(llm_client=self.llm_client)
 
@@ -95,10 +95,10 @@ class DeepResearchWorkflow:
                 )
 
         if self.use_knowledge_base and self.knowledge_base:
-            # 从 Milvus 知识库检索
+            # 从 Chroma 知识库检索
             for query in sub_queries[:3]:
                 search_tasks.append(
-                    self._search_milvus(query, top_k=max_kb_results // len(sub_queries))
+                    self._search_kb(query, top_k=max_kb_results // len(sub_queries))
                 )
 
         # 并行执行
@@ -116,7 +116,7 @@ class DeepResearchWorkflow:
                         if isinstance(result[0], SearchResult):
                             web_results.extend(result)
                         elif isinstance(result[0], dict):
-                            # Milvus 返回的是字典列表
+                            # KB 返回的是字典列表
                             kb_results.extend(result)
 
         logger.info(f"Collected {len(web_results)} web results, {len(kb_results)} KB results")
@@ -136,9 +136,9 @@ class DeepResearchWorkflow:
         logger.info("DeepResearch completed")
         return report
 
-    async def _search_milvus(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    async def _search_kb(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
-        从 Milvus 知识库搜索
+        从 Chroma 知识库搜索
 
         Args:
             query: 查询文本
@@ -149,10 +149,10 @@ class DeepResearchWorkflow:
         """
         try:
             results = self.knowledge_base.search(query=query, top_k=top_k, filter_type=None)
-            logger.debug(f"Milvus search returned {len(results)} results for: {query[:50]}...")
+            logger.debug(f"KB search returned {len(results)} results for: {query[:50]}...")
             return results
         except Exception as e:
-            logger.error(f"Milvus search failed: {e}")
+            logger.error(f"KB search failed: {e}")
             return []
 
     async def _plan_queries(self, question: str) -> List[str]:

@@ -9,7 +9,7 @@ MediX 多智能体医疗助手 - Web 界面
 功能:
     - 对话区：用户输入健康问题，后端调用 Swarm 多智能体协作系统
     - 历史记录：展示当前会话的完整对话历史
-    - 侧边栏：显示 Agent 状态、Swarm 模式开关、会话信息
+    - 侧边栏：显示 Agent 状态、会话信息、操作按钮
     - 进度提示：处理过程中显示状态信息
 """
 
@@ -164,13 +164,9 @@ def init_session_state() -> None:
     if "conversation_count" not in st.session_state:
         st.session_state.conversation_count = 0
 
-    if "enable_swarm" not in st.session_state:
-        st.session_state.enable_swarm = True
-
     if "coordinator" not in st.session_state:
-        st.session_state.coordinator = SwarmCoordinator(
-            enable_swarm=st.session_state.enable_swarm
-        )
+        # enable_swarm 始终为 True，后端根据问题复杂度自动判断单/多 Agent
+        st.session_state.coordinator = SwarmCoordinator(enable_swarm=True)
 
 
 # ============================================================================
@@ -179,6 +175,7 @@ def init_session_state() -> None:
 def run_async(coro):
     """
     安全地运行异步协程，兼容已有 / 没有事件循环的环境。
+    Streamlit 环境没有运行中的事件循环，直接使用 asyncio.run()。
 
     Args:
         coro: 一个 awaitable 协程对象
@@ -187,37 +184,35 @@ def run_async(coro):
         协程的返回值
     """
     try:
-        # 如果当前线程已有运行中的事件循环（极少见，但做安全处理）
-        loop = asyncio.get_running_loop()
-        # 在独立线程中运行
+        # 检查当前线程是否有运行中的事件循环
+        asyncio.get_running_loop()
+        # 有运行中的循环（极少见）→ 在独立线程中执行
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, coro)
-            return future.result(timeout=120)
+            return future.result(timeout=90)
     except RuntimeError:
-        # 没有运行中的事件循环 → 直接使用 asyncio.run()
+        # 没有运行中的事件循环 → 直接使用 asyncio.run()（Streamlit 的常见路径）
         return asyncio.run(coro)
 
 
 def ask_agent(
     user_input: str,
-    enable_swarm: bool = True,
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     同步封装：调用 SwarmCoordinator 处理用户健康问题。
+    后端自动判断问题复杂度：简单问题用单 Agent，复杂问题用多 Agent 协作。
 
     Args:
         user_input: 用户输入的健康问题
-        enable_swarm: 是否启用多智能体协作模式
         session_id: 会话 ID，用于记忆连续性
 
     Returns:
         包含 answer, swarm_enabled, agents_involved, suggestions, disclaimer 等字段的字典
     """
     coordinator: SwarmCoordinator = st.session_state.coordinator
-    coordinator.enable_swarm = enable_swarm
 
-    logger.info(f"Processing query (swarm={enable_swarm}): {user_input[:60]}...")
+    logger.info(f"Processing query: {user_input[:60]}...")
 
     result = run_async(
         coordinator.process(user_input, session_id=session_id)
@@ -264,7 +259,7 @@ AGENT_CAPABILITIES = {
 def render_sidebar() -> None:
     """渲染侧边栏：会话信息、Agent 状态、操作按钮"""
     with st.sidebar:
-        st.title("🏥 MediX 控制台")
+        st.title("🏥 控制台")
         st.markdown("---")
 
         # ── 会话信息 ──
@@ -272,23 +267,6 @@ def render_sidebar() -> None:
         sid = st.session_state.session_id
         st.caption(f"会话 ID: `{sid[:20]}...`")
         st.metric("对话轮次", st.session_state.conversation_count)
-
-        st.markdown("---")
-
-        # ── Swarm 模式开关 ──
-        st.subheader("⚙️ 系统设置")
-        new_swarm = st.toggle(
-            "启用 Swarm 多智能体协作",
-            value=st.session_state.enable_swarm,
-            help=(
-                "**开启**：复杂问题自动拆解，多个专业 Agent 并行分析后汇总。\n\n"
-                "**关闭**：所有问题由单个 Agent 处理，响应更快但分析维度单一。"
-            ),
-        )
-        if new_swarm != st.session_state.enable_swarm:
-            st.session_state.enable_swarm = new_swarm
-            if "coordinator" in st.session_state:
-                st.session_state.coordinator.enable_swarm = new_swarm
 
         st.markdown("---")
 
@@ -333,9 +311,7 @@ def render_sidebar() -> None:
                 st.session_state.session_id = new_id
                 st.session_state.conversation_count = 0
                 # 重建 coordinator 以清理短期记忆
-                st.session_state.coordinator = SwarmCoordinator(
-                    enable_swarm=st.session_state.enable_swarm
-                )
+                st.session_state.coordinator = SwarmCoordinator(enable_swarm=True)
                 st.rerun()
 
         with col_b:
@@ -351,10 +327,12 @@ def render_sidebar() -> None:
                 """
             | 问题类型 | 示例 | 系统行为 |
             |---|---|---|
-            | 简单咨询 | "感冒怎么办" | 单 Agent 快速回复 |
-            | 复杂症状 | "头痛+恶心+视力模糊" | 多 Agent 协作 |
+            | 简单咨询 | "感冒怎么办" | 自动单 Agent 快速回复 |
+            | 复杂症状 | "头痛+恶心+视力模糊" | 自动多 Agent 协作 |
             | 循证查询 | "高血压最新诊疗指南" | Research Agent 检索 |
             | 风险评估 | "胸闷气短冒冷汗严重吗" | Diagnostic Agent 评估 |
+
+            > 系统会根据问题复杂度**自动判断**使用单 Agent 还是多 Agent 协作，无需手动切换。
             """
             )
 
@@ -378,7 +356,7 @@ def render_welcome() -> None:
     st.markdown(
         """
     <div class="welcome-box">
-        <h3>👋 您好！我是 MediX 多智能体医疗助手</h3>
+        <h3>👋 您好！我是智能体医疗助手</h3>
         <p>由 <b>健康咨询</b>、<b>诊断推理</b>、<b>循证医学</b> 三大专业 Agent 协同驱动</p>
         <p style="margin-top:0.8rem;font-size:0.85rem;">
             您可以直接描述您的健康问题或症状，系统会自动判断是否需要多 Agent 协作分析。
@@ -470,15 +448,10 @@ def handle_user_input(prompt: str) -> None:
     st.session_state.conversation_count += 1
 
     with st.chat_message("assistant"):
-        status_text = "🤔 正在分析您的问题..."
-        if st.session_state.enable_swarm:
-            status_text = "🐝 Swarm 协作启动中，多个 Agent 正在并行分析..."
-
-        with st.spinner(status_text):
+        with st.spinner("🤔 正在分析您的问题，Agent 工作中..."):
             try:
                 result = ask_agent(
                     prompt,
-                    enable_swarm=st.session_state.enable_swarm,
                     session_id=st.session_state.session_id,
                 )
             except Exception as exc:
@@ -549,7 +522,7 @@ def main() -> None:
     st.markdown(
         """
     <div class="main-header">
-        <h1>🏥 MediX 多智能体医疗助手</h1>
+        <h1>🏥 医疗助手Agent</h1>
         <p>健康咨询 · 诊断推理 · 循证医学 — 三大 Agent 群体协作</p>
     </div>
     """,

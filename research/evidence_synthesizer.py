@@ -114,7 +114,7 @@ class EvidenceSynthesizer:
                 prompt += f"   来源: {result.url}\n"
                 prompt += f"   摘要: {result.snippet}\n\n"
 
-        # 添加知识库检索结果（Milvus 返回的字典）
+        # 添加知识库检索结果（KB 返回的字典）
         if kb_results:
             prompt += "【知识库检索结果】\n"
             for i, doc in enumerate(kb_results[:5], 1):

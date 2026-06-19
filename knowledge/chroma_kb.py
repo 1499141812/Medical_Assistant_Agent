@@ -99,8 +99,10 @@ class ChromaKnowledgeBase:
         output = []
         if results['documents'] and results['documents'][0]:
             for i in range(len(results['documents'][0])):
+                text = results['documents'][0][i]
                 output.append({
-                    "text": results['documents'][0][i],
+                    "content": text,
+                    "text": text,          # 向后兼容
                     "metadata": results['metadatas'][0][i] if results['metadatas'] else {},
                     "score": 1 - results['distances'][0][i]
                 })

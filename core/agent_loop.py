@@ -32,12 +32,12 @@ class AgentLoop:
     - 自动记录每轮的 user/assistant 消息
     """
 
-    def __init__(self, max_iterations: int = 10, short_term_memory: Optional[Any] = None, max_tool_calls: int = 2):
+    def __init__(self, max_iterations: int = 3, short_term_memory: Optional[Any] = None, max_tool_calls: int = 2):
         """
         初始化Agent循环引擎
 
         Args:
-            max_iterations: 最大迭代次数（防止无限循环）
+            max_iterations: 最大迭代次数（防止无限循环，默认3次）
             short_term_memory: 短期记忆管理器（可选）
             max_tool_calls: 最大 Skill 调用次数（硬性限制，默认2次）
         """
@@ -109,7 +109,8 @@ class AgentLoop:
                         messages=messages,
                         tools=tools_openai_format,
                         tool_choice="auto",
-                        temperature=agent.config.get('temperature', 0.7)
+                        temperature=agent.config.get('temperature', 0.7),
+                        max_tokens=agent.config.get('max_tokens', 4096)
                     )
 
                     # 记录中间结果
@@ -265,11 +266,12 @@ class AgentLoop:
                         'content': '请基于以上信息，提供最终的答复。'
                     })
 
-                    # 调用 LLM（禁用 function calling）
+                    # 调用 LLM（禁用 function calling，限制输出长度）
                     final_response = await agent.llm_client.chat_with_tools(
                         messages=messages,
                         tools=None,
-                        temperature=0.7
+                        temperature=0.7,
+                        max_tokens=2048
                     )
 
                     result = {
@@ -320,11 +322,11 @@ class AgentLoop:
                 'content': system_prompt
             })
 
-        # 加载历史对话（短期记忆）
+        # 加载历史对话（短期记忆）— 减少到3轮以降低 token 消耗
         if self.short_term_memory and session_id:
-            history = self.short_term_memory.get_history(session_id, limit=5)  # 最近5轮对话
+            history = self.short_term_memory.get_history(session_id, limit=3)
             if history:
-                logger.info(f"Loaded {len(history)} historical messages from short-term memory")
+                logger.debug(f"Loaded {len(history)} historical messages from short-term memory")
                 messages.extend(history)
 
         # 用户输入
