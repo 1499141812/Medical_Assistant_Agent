@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MediX 多智能体医疗助手 - Web 界面
+多智能体医疗助手 - Web 界面
 基于 Streamlit 的单页应用
 
 运行方式:
@@ -38,13 +38,13 @@ from swarm.shared_context import SharedContext
 # 页面配置
 # ============================================================================
 st.set_page_config(
-    page_title="MediX 多智能体医疗助手",
+    page_title="多智能体医疗助手",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
         "About": (
-            "MediX 多智能体医疗助手 v0.1.0\n\n"
+            "多智能体医疗助手 v0.1.0\n\n"
             "基于 Swarm 架构的智能医疗咨询系统，"
             "集成健康咨询、诊断推理、循证医学三大专业 Agent。"
         )

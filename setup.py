@@ -1,5 +1,5 @@
 """
-Setup script for medix-agent-swarm
+Setup script for medical_assistant_agent_swarm
 """
 from setuptools import setup, find_packages
 
@@ -10,7 +10,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="medix-agent-swarm",
+    name="medical_assistant_agent_swarm",
     version="0.1.0",
     author="MediX Team",
     description="Multi-agent medical assistant system based on MediX-R1",

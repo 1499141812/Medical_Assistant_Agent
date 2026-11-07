@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MediX多智能体医疗助手 - 主入口
+多智能体医疗助手 - 主入口
 交互式对话；可选 -v / --verbose 开启详细日志
 """
 import asyncio

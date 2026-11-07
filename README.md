@@ -1,6 +1,20 @@
-# MediX多智能体医疗助手
+# 多智能体医疗助手
 
 基于 Skills-Agent 两层架构的多智能体协作医疗助手系统，融合 Agent Loop、Agent Swarm、记忆管理和 Chroma 知识库。
+
+## 🖼️ 界面展示
+
+### Streamlit Web 界面
+
+![Streamlit Web 界面](docs/images/web_ui.png)
+
+### 多 Agent 协作回答
+
+![多 Agent 协作回答](docs/images/swarm_result.png)
+
+### 单 Agent 回答
+
+![单 Agent 回答](docs/images/single_agent_result.png)
 
 ## 📋 项目概述
 
@@ -80,9 +94,9 @@ python examples/test_all.py
 ### 1. 环境准备
 
 ```bash
-conda create -n medix-swarm python=3.12 -y
-conda activate medix-swarm
-cd medix-agent-swarm
+conda create -n medical_assistant_agent_swarm python=3.12 -y
+conda activate medical_assistant_agent_swarm
+cd medical_assistant_agent_swarm
 ```
 
 ### 2. 安装依赖
@@ -122,13 +136,14 @@ python examples/test_all.py
 ### 6. 开始使用
 
 ```bash
-python main.py
+cd Medical_Assistant_Agent\medical_assistant_agent_swarm
+streamlit run app.py
 ```
 
 ## 📦 项目结构
 
 ```
-medix-agent-swarm/
+medical_assistant_agent_swarm/
 ├── .claude/skills/                    # Claude Code Skills (10个)
 │   ├── search-knowledge/              # 搜索医学知识库
 │   │   └── script/
@@ -229,7 +244,7 @@ medix-agent-swarm/
 ├── main.py                            # 主入口（交互式对话）
 ├── setup.py                           # 安装脚本
 ├── requirements.txt                   # 依赖列表
-├── MediX代码解读.md                   # 代码解读文档
+├── 代码解读.md                   # 代码解读文档
 └── README.md                          # 本文档
 ```
 
@@ -434,7 +449,7 @@ results = memory.search("高血压患者如何管理？")
 
 ### 实现的 Harness 原则
 
-| 原则 | MediX 实现 | 位置 |
+| 原则 |  实现 | 位置 |
 |------|-----------|------|
 | **约束驱动** | YAML 定义 Agent 能力边界，运行时验证 | `constraints/` |
 | **自动修复** | 输出违规自动添加免责声明、高危警告 | `validation/` |
